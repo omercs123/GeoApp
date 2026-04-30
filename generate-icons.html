@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Generate Icons</title>
+  <style>
+    body { font-family: sans-serif; background: #0f172a; color: #f1f5f9; padding: 24px; }
+    h2 { margin-bottom: 8px; }
+    p  { color: #94a3b8; margin-bottom: 24px; font-size: 14px; }
+    .previews { display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 24px; }
+    canvas { border-radius: 16px; box-shadow: 0 4px 20px rgba(0,0,0,.5); }
+    .btn {
+      display: inline-block; margin: 6px;
+      background: #3b82f6; color: #fff;
+      border: none; border-radius: 10px;
+      padding: 10px 18px; font-size: 14px; font-weight: 700;
+      cursor: pointer; text-decoration: none;
+    }
+    .btn:hover { background: #2563eb; }
+    .note { color: #f59e0b; font-size: 13px; margin-top: 16px; }
+  </style>
+</head>
+<body>
+  <h2>🔔 Location Alarm — Icon Generator</h2>
+  <p>Opens in browser, draws icons on canvas, then downloads them as PNG files.<br>
+     Run this once, move the 4 downloaded PNGs into the <code>icons/</code> folder.</p>
+
+  <div class="previews" id="previews"></div>
+  <div id="buttons"></div>
+  <p class="note">⚠ If your browser blocks multiple downloads, click each button individually.</p>
+
+  <script>
+    const ICONS = [
+      { name: 'icon-192.png',          size: 192, maskable: false },
+      { name: 'icon-512.png',          size: 512, maskable: false },
+      { name: 'icon-maskable-192.png', size: 192, maskable: true  },
+      { name: 'icon-maskable-512.png', size: 512, maskable: true  },
+    ];
+
+    function drawIcon(canvas, size, maskable) {
+      const ctx  = canvas.getContext('2d');
+      const s    = size;
+      const pad  = maskable ? 0 : s * 0.08;  /* outer rounding padding */
+      canvas.width  = s;
+      canvas.height = s;
+      ctx.clearRect(0, 0, s, s);
+
+      /* ── Background ─────────────────────────────────── */
+      ctx.fillStyle = '#0f172a';
+      if (maskable) {
+        ctx.fillRect(0, 0, s, s);
+      } else {
+        const r = s * 0.16;
+        ctx.beginPath();
+        ctx.moveTo(r, 0);
+        ctx.lineTo(s - r, 0);
+        ctx.quadraticCurveTo(s, 0, s, r);
+        ctx.lineTo(s, s - r);
+        ctx.quadraticCurveTo(s, s, s - r, s);
+        ctx.lineTo(r, s);
+        ctx.quadraticCurveTo(0, s, 0, s - r);
+        ctx.lineTo(0, r);
+        ctx.quadraticCurveTo(0, 0, r, 0);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      /* ── Scale factor (maskable leaves more safe-zone margin) ── */
+      const scale = maskable ? 0.58 : 0.72;
+      const cx = s / 2;
+      const cy = s / 2;
+
+      /* Bell geometry — all values in "unit" space (0-100), then scaled */
+      function u(v) { return (v - 50) * scale * (s / 100) + (maskable ? cy : cx); }
+      function uy(v) { return (v - 50) * scale * (s / 100) + cy; }
+
+      ctx.fillStyle = '#3b82f6';
+
+      /* Stem */
+      ctx.beginPath();
+      const stemW = 4.5 * scale * (s / 100);
+      const stemX = cx - stemW / 2;
+      const stemY = uy(6);
+      const stemH = 6 * scale * (s / 100);
+      const stemR = stemW * 0.4;
+      ctx.roundRect(stemX, stemY, stemW, stemH, stemR);
+      ctx.fill();
+
+      /* Hook arch above stem */
+      ctx.strokeStyle = '#3b82f6';
+      ctx.lineWidth   = 3 * scale * (s / 100);
+      ctx.lineCap     = 'round';
+      ctx.beginPath();
+      ctx.arc(cx, uy(6), 6 * scale * (s / 100), Math.PI, 0, false);
+      ctx.stroke();
+
+      /* Bell body trapezoid */
+      ctx.fillStyle = '#3b82f6';
+      ctx.beginPath();
+      ctx.moveTo(cx - 2 * scale * (s / 100), uy(12));  /* top-left */
+      ctx.lineTo(cx + 2 * scale * (s / 100), uy(12));  /* top-right */
+      ctx.lineTo(cx + 21 * scale * (s / 100), uy(62)); /* bottom-right */
+      ctx.lineTo(cx - 21 * scale * (s / 100), uy(62)); /* bottom-left */
+      ctx.closePath();
+      ctx.fill();
+
+      /* Rim bar */
+      const rimH = 6 * scale * (s / 100);
+      const rimW = 56 * scale * (s / 100);
+      ctx.beginPath();
+      ctx.roundRect(cx - rimW / 2, uy(62), rimW, rimH, rimH / 2);
+      ctx.fill();
+
+      /* Clapper */
+      ctx.beginPath();
+      ctx.arc(cx, uy(77), 5.5 * scale * (s / 100), 0, Math.PI * 2);
+      ctx.fill();
+
+      /* Subtle highlight on bell body */
+      ctx.fillStyle = 'rgba(255,255,255,0.10)';
+      ctx.beginPath();
+      ctx.moveTo(cx - 2 * scale * (s / 100), uy(12));
+      ctx.lineTo(cx + 2 * scale * (s / 100), uy(12));
+      ctx.lineTo(cx + 7  * scale * (s / 100), uy(35));
+      ctx.lineTo(cx - 6  * scale * (s / 100), uy(30));
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    const previews = document.getElementById('previews');
+    const buttons  = document.getElementById('buttons');
+
+    ICONS.forEach(({ name, size, maskable }) => {
+      const canvas = document.createElement('canvas');
+      canvas.title = name;
+      /* Show at 96px max for preview */
+      canvas.style.width  = Math.min(size, 96) + 'px';
+      canvas.style.height = Math.min(size, 96) + 'px';
+      drawIcon(canvas, size, maskable);
+      previews.appendChild(canvas);
+
+      const a = document.createElement('a');
+      a.className = 'btn';
+      a.textContent = `⬇ ${name}`;
+      a.href     = canvas.toDataURL('image/png');
+      a.download = name;
+      buttons.appendChild(a);
+    });
+  </script>
+</body>
+</html>

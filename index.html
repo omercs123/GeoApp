@@ -1,0 +1,879 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="theme-color" content="#1e293b" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <title>Location Alarm</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <style>
+    :root {
+      --bg:           #0f172a;
+      --surface:      #1e293b;
+      --surface2:     #334155;
+      --text:         #f1f5f9;
+      --muted:        #94a3b8;
+      --accent:       #3b82f6;
+      --success:      #22c55e;
+      --warning:      #f59e0b;
+      --danger:       #ef4444;
+      --r:            16px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100dvh;
+      overflow-x: hidden;
+    }
+
+    /* ── Header ─────────────────────────────────────── */
+    header {
+      position: sticky; top: 0; z-index: 200;
+      background: var(--surface);
+      border-bottom: 1px solid var(--surface2);
+      padding: 14px 18px;
+      display: flex; align-items: center; gap: 10px;
+    }
+    header h1 { font-size: 19px; font-weight: 700; letter-spacing: -.4px; }
+    .hdr-dot {
+      margin-left: auto;
+      width: 10px; height: 10px; border-radius: 50%;
+      background: var(--muted);
+      transition: background .3s, box-shadow .3s;
+    }
+    .hdr-dot.active  { background: var(--success); box-shadow: 0 0 8px var(--success); }
+    .hdr-dot.alarming { background: var(--danger);  box-shadow: 0 0 10px var(--danger); animation: blink .5s infinite; }
+
+    /* PWA install button — only visible when browser fires beforeinstallprompt */
+    #installBtn {
+      display: none;
+      margin-left: auto;
+      background: rgba(59,130,246,.15);
+      border: 1px solid rgba(59,130,246,.4);
+      border-radius: 8px;
+      color: var(--accent);
+      font-size: 12px; font-weight: 700;
+      padding: 6px 11px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    #installBtn.visible { display: flex; align-items: center; gap: 5px; }
+    /* Push status dot to the right of install btn */
+    #installBtn.visible ~ .hdr-dot { margin-left: 0; }
+
+    /* ── Layout ─────────────────────────────────────── */
+    main {
+      padding: 14px;
+      display: flex; flex-direction: column; gap: 14px;
+      max-width: 600px; margin: 0 auto;
+      padding-bottom: 36px;
+    }
+
+    .card {
+      background: var(--surface);
+      border-radius: var(--r);
+      padding: 18px;
+      box-shadow: 0 4px 20px rgba(0,0,0,.35);
+    }
+    .card-label {
+      font-size: 11px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: 1.1px;
+      color: var(--muted); margin-bottom: 12px;
+    }
+
+    /* ── Search ─────────────────────────────────────── */
+    .search-wrap { position: relative; }
+
+    .search-input {
+      width: 100%;
+      background: var(--surface2);
+      border: 2px solid transparent;
+      border-radius: 12px;
+      color: var(--text);
+      font-size: 16px;
+      padding: 13px 50px 13px 14px;
+      outline: none;
+      transition: border-color .2s;
+    }
+    .search-input:focus { border-color: var(--accent); }
+    .search-input::placeholder { color: var(--muted); }
+
+    .search-go {
+      position: absolute; right: 7px; top: 50%; transform: translateY(-50%);
+      background: var(--accent); border: none; border-radius: 9px;
+      color: #fff; font-size: 17px; padding: 8px 10px;
+      cursor: pointer; line-height: 1;
+      display: flex; align-items: center; gap: 5px;
+    }
+    .search-go .spinner {
+      display: none; width: 15px; height: 15px;
+      border: 2px solid rgba(255,255,255,.35); border-top-color: #fff;
+      border-radius: 50%; animation: spin .65s linear infinite;
+    }
+    .search-go.loading .spinner { display: block; }
+    .search-go.loading .go-icon { display: none; }
+
+    .results-list {
+      display: none; margin-top: 7px;
+      background: var(--surface2); border-radius: 12px; overflow: hidden;
+    }
+    .results-list.open { display: block; }
+
+    .result-item {
+      padding: 13px 14px; cursor: pointer;
+      border-bottom: 1px solid var(--surface);
+      transition: background .15s;
+    }
+    .result-item:last-child { border: none; }
+    .result-item:hover, .result-item:active { background: var(--bg); }
+    .ri-name { font-size: 14px; font-weight: 600; }
+    .ri-addr { font-size: 12px; color: var(--muted); margin-top: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+    .target-chip {
+      display: none; align-items: center; gap: 9px;
+      margin-top: 10px; padding: 11px 13px;
+      background: rgba(59,130,246,.12);
+      border: 1px solid rgba(59,130,246,.3);
+      border-radius: 10px;
+    }
+    .target-chip.visible { display: flex; }
+    .tc-name { font-size: 13px; font-weight: 500; flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tc-clear { background: none; border: none; color: var(--muted); font-size: 18px; cursor: pointer; flex-shrink: 0; padding: 2px 4px; }
+
+    /* ── Coordinates collapse ───────────────────────── */
+    .coords-toggle {
+      display: flex; align-items: center; gap: 7px;
+      margin-top: 11px; color: var(--muted); font-size: 13px;
+      cursor: pointer; user-select: none;
+    }
+    .coords-arrow { font-size: 10px; transition: transform .2s; }
+    .coords-arrow.open { transform: rotate(90deg); }
+
+    .coords-row {
+      display: none; gap: 8px; margin-top: 9px; align-items: center;
+    }
+    .coords-row.open { display: flex; }
+
+    .coord-input {
+      flex: 1; background: var(--surface2); border: 2px solid transparent;
+      border-radius: 10px; color: var(--text); font-size: 14px;
+      padding: 11px 10px; text-align: center; outline: none;
+      transition: border-color .2s; min-width: 0;
+    }
+    .coord-input:focus { border-color: var(--accent); }
+    .coord-input::placeholder { color: var(--muted); font-size: 12px; }
+
+    .coords-set {
+      background: var(--accent); border: none; border-radius: 10px;
+      color: #fff; font-size: 13px; font-weight: 700;
+      padding: 11px 14px; cursor: pointer; white-space: nowrap;
+    }
+
+    /* ── Radius ─────────────────────────────────────── */
+    .radius-row { display: flex; align-items: center; gap: 12px; }
+
+    input[type=range] {
+      flex: 1; -webkit-appearance: none; appearance: none;
+      height: 6px; background: var(--surface2); border-radius: 3px; outline: none;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 24px; height: 24px;
+      background: var(--accent); border-radius: 50%; cursor: pointer;
+      box-shadow: 0 2px 8px rgba(59,130,246,.45);
+    }
+
+    .radius-badge {
+      background: var(--surface2); border-radius: 8px;
+      padding: 8px 11px; font-size: 14px; font-weight: 700;
+      min-width: 76px; text-align: center; white-space: nowrap;
+    }
+
+    /* ── Map ────────────────────────────────────────── */
+    #map {
+      height: 210px; border-radius: 12px;
+      background: var(--surface2); overflow: hidden;
+    }
+
+    /* ── Status ─────────────────────────────────────── */
+    .status-body {
+      display: flex; flex-direction: column;
+      align-items: center; gap: 6px; padding: 6px 0;
+    }
+    .dist-num {
+      font-size: 58px; font-weight: 800;
+      letter-spacing: -2px; line-height: 1;
+      color: var(--text); transition: color .4s;
+    }
+    .dist-num.near    { color: var(--warning); }
+    .dist-num.inside  { color: var(--danger); }
+    .dist-unit { font-size: 20px; font-weight: 400; color: var(--muted); }
+    .status-msg { font-size: 13px; color: var(--muted); text-align: center; }
+    .accuracy-msg { font-size: 11px; color: var(--muted); }
+
+    /* ── Snooze banner ──────────────────────────────── */
+    .snooze-banner {
+      display: none; align-items: center; justify-content: center; gap: 7px;
+      padding: 11px 14px; border-radius: 12px;
+      background: rgba(245,158,11,.1);
+      border: 1px solid rgba(245,158,11,.3);
+      color: var(--warning); font-size: 13px; font-weight: 500;
+    }
+    .snooze-banner.visible { display: flex; }
+    .snooze-cancel {
+      margin-left: auto; background: none; border: none;
+      color: var(--warning); font-size: 13px; font-weight: 700; cursor: pointer;
+    }
+
+    /* ── Buttons ────────────────────────────────────── */
+    .controls { display: flex; gap: 10px; }
+    .btn {
+      flex: 1; border: none; border-radius: 14px;
+      font-size: 16px; font-weight: 700; padding: 18px;
+      cursor: pointer; transition: opacity .15s, transform .1s;
+      letter-spacing: .2px;
+    }
+    .btn:active  { transform: scale(.97); opacity: .88; }
+    .btn:disabled { opacity: .35; cursor: not-allowed; }
+    .btn-start { background: var(--success); color: #fff; }
+    .btn-stop  { background: var(--danger);  color: #fff; }
+
+    /* ── Alarm overlay ──────────────────────────────── */
+    .alarm-overlay {
+      display: none; position: fixed; inset: 0; z-index: 900;
+      background: rgba(239,68,68,.12);
+      backdrop-filter: blur(6px);
+      align-items: center; justify-content: center; padding: 24px;
+    }
+    .alarm-overlay.active { display: flex; animation: fadeIn .3s ease; }
+
+    .alarm-box {
+      background: var(--surface);
+      border: 1px solid rgba(239,68,68,.35);
+      border-radius: 24px; padding: 36px 26px;
+      text-align: center; width: 100%; max-width: 360px;
+      box-shadow: 0 0 80px rgba(239,68,68,.25), 0 24px 60px rgba(0,0,0,.6);
+      animation: popIn .4s cubic-bezier(.34,1.56,.64,1);
+    }
+    .alarm-bell { font-size: 60px; animation: sway .6s ease-in-out infinite; }
+    .alarm-title {
+      font-size: 26px; font-weight: 800;
+      color: var(--danger); letter-spacing: -1px;
+      margin: 12px 0 6px;
+    }
+    .alarm-sub { font-size: 14px; color: var(--muted); margin-bottom: 28px; }
+
+    .alarm-btns { display: flex; gap: 10px; }
+    .btn-dismiss { flex: 2; background: var(--danger);  color: #fff; }
+    .btn-snooze  { flex: 1; background: var(--surface2); color: var(--text); }
+
+    /* ── Animations ─────────────────────────────────── */
+    @keyframes blink  { 0%,100%{opacity:1}50%{opacity:.3} }
+    @keyframes spin   { to{transform:rotate(360deg)} }
+    @keyframes sway   { 0%,100%{transform:rotate(-14deg)}50%{transform:rotate(14deg)} }
+    @keyframes fadeIn { from{opacity:0} to{opacity:1} }
+    @keyframes popIn  { from{transform:scale(.82);opacity:0} to{transform:scale(1);opacity:1} }
+    @keyframes pulse  { 0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.6)} 70%{box-shadow:0 0 0 14px rgba(239,68,68,0)} }
+  </style>
+</head>
+<body>
+
+<header>
+  <span style="font-size:22px">🔔</span>
+  <h1>Location Alarm</h1>
+  <button id="installBtn" title="Install app">⬇ Install</button>
+  <div class="hdr-dot" id="hdrDot"></div>
+</header>
+
+<main>
+
+  <!-- Destination card -->
+  <div class="card">
+    <div class="card-label">Destination</div>
+    <div class="search-wrap">
+      <input class="search-input" id="searchInput" type="text"
+             placeholder="Search for a place…" autocomplete="off" autocorrect="off" />
+      <button class="search-go" id="searchBtn">
+        <span class="go-icon">🔍</span>
+        <span class="spinner"></span>
+      </button>
+    </div>
+    <div class="results-list" id="resultsList"></div>
+
+    <div class="target-chip" id="targetChip">
+      <span>📍</span>
+      <span class="tc-name" id="chipName"></span>
+      <button class="tc-clear" id="clearBtn" title="Clear destination">✕</button>
+    </div>
+
+    <div class="coords-toggle" id="coordsToggle">
+      <span class="coords-arrow" id="coordsArrow">▶</span>
+      Enter coordinates manually
+    </div>
+    <div class="coords-row" id="coordsRow">
+      <input class="coord-input" id="latIn" type="number" placeholder="Latitude" step="any" />
+      <input class="coord-input" id="lonIn" type="number" placeholder="Longitude" step="any" />
+      <button class="coords-set" id="coordsSetBtn">Set</button>
+    </div>
+  </div>
+
+  <!-- Radius card -->
+  <div class="card">
+    <div class="card-label">Trigger Radius</div>
+    <div class="radius-row">
+      <input type="range" id="radiusSlider" min="50" max="2000" value="200" step="50" />
+      <div class="radius-badge" id="radiusBadge">200 m</div>
+    </div>
+  </div>
+
+  <!-- Map -->
+  <div class="card" style="padding:0;overflow:hidden;">
+    <div id="map"></div>
+  </div>
+
+  <!-- Status -->
+  <div class="card">
+    <div class="card-label">Distance to Target</div>
+    <div class="status-body">
+      <div class="dist-num" id="distNum">–</div>
+      <div class="status-msg" id="statusMsg">Set a destination and tap Start</div>
+      <div class="accuracy-msg" id="accMsg"></div>
+    </div>
+  </div>
+
+  <!-- Snooze banner -->
+  <div class="snooze-banner" id="snoozeBanner">
+    <span>⏱</span>
+    <span>Snoozed — alarm resumes in <strong id="snoozeTime"></strong></span>
+    <button class="snooze-cancel" id="snoozeCancelBtn">Cancel</button>
+  </div>
+
+  <!-- Controls -->
+  <div class="controls">
+    <button class="btn btn-start" id="startBtn">▶ Start Tracking</button>
+    <button class="btn btn-stop"  id="stopBtn"  disabled>■ Stop</button>
+  </div>
+
+</main>
+
+<!-- Alarm overlay -->
+<div class="alarm-overlay" id="alarmOverlay">
+  <div class="alarm-box">
+    <div class="alarm-bell">🔔</div>
+    <div class="alarm-title">You've Arrived!</div>
+    <div class="alarm-sub" id="alarmSub">You are within your target area.</div>
+    <div class="alarm-btns">
+      <button class="btn btn-dismiss" id="dismissBtn">Stop Alarm</button>
+      <button class="btn btn-snooze"  id="snoozeBtn">Snooze 5 min</button>
+    </div>
+  </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+/* ═══════════════════════════════════════════════════════
+   State
+══════════════════════════════════════════════════════ */
+const S = {
+  target:       null,   // { lat, lon, name }
+  radius:       200,    // metres
+  tracking:     false,
+  watchId:      null,
+  pos:          null,   // { lat, lon, acc }
+  alarmFiring:  false,
+  alarmArmed:   true,   // false after dismiss until user leaves radius
+  snoozed:      false,
+  snoozeTimer:  null,
+  snoozeEnd:    0,
+  snoozeCountdownInterval: null,
+  audioCtx:     null,
+  alarmLoop:    null,
+  wakeLock:     null,
+  map:          null,
+  userMarker:   null,
+  targetMarker: null,
+  radiusCircle: null,
+};
+
+/* ═══════════════════════════════════════════════════════
+   DOM refs
+══════════════════════════════════════════════════════ */
+const el = id => document.getElementById(id);
+const searchInput    = el('searchInput');
+const searchBtn      = el('searchBtn');
+const resultsList    = el('resultsList');
+const targetChip     = el('targetChip');
+const chipName       = el('chipName');
+const clearBtn       = el('clearBtn');
+const coordsToggle   = el('coordsToggle');
+const coordsArrow    = el('coordsArrow');
+const coordsRow      = el('coordsRow');
+const latIn          = el('latIn');
+const lonIn          = el('lonIn');
+const coordsSetBtn   = el('coordsSetBtn');
+const radiusSlider   = el('radiusSlider');
+const radiusBadge    = el('radiusBadge');
+const distNum        = el('distNum');
+const statusMsg      = el('statusMsg');
+const accMsg         = el('accMsg');
+const startBtn       = el('startBtn');
+const stopBtn        = el('stopBtn');
+const alarmOverlay   = el('alarmOverlay');
+const alarmSub       = el('alarmSub');
+const dismissBtn     = el('dismissBtn');
+const snoozeBtn      = el('snoozeBtn');
+const hdrDot         = el('hdrDot');
+const snoozeBanner   = el('snoozeBanner');
+const snoozeTime     = el('snoozeTime');
+const snoozeCancelBtn = el('snoozeCancelBtn');
+
+/* ═══════════════════════════════════════════════════════
+   Map (Leaflet + OpenStreetMap)
+══════════════════════════════════════════════════════ */
+S.map = L.map('map', { zoomControl: true })
+  .setView([20, 0], 2);
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  maxZoom: 19,
+  attribution: '© <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
+}).addTo(S.map);
+
+const userIcon = L.divIcon({
+  className: '',
+  html: `<div style="
+    width:16px;height:16px;
+    background:#3b82f6;border:3px solid #fff;
+    border-radius:50%;box-shadow:0 2px 8px rgba(0,0,0,.45)
+  "></div>`,
+  iconSize: [16, 16], iconAnchor: [8, 8]
+});
+
+const targetIconEl = L.divIcon({
+  className: '',
+  html: `<div style="font-size:30px;line-height:1;filter:drop-shadow(0 2px 4px rgba(0,0,0,.5))">📍</div>`,
+  iconSize: [30, 30], iconAnchor: [15, 30]
+});
+
+/* ═══════════════════════════════════════════════════════
+   Haversine distance (metres)
+══════════════════════════════════════════════════════ */
+function haversine(lat1, lon1, lat2, lon2) {
+  const R = 6_371_000;
+  const rad = x => x * Math.PI / 180;
+  const dLat = rad(lat2 - lat1);
+  const dLon = rad(lon2 - lon1);
+  const a = Math.sin(dLat / 2) ** 2
+          + Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(dLon / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function fmtDist(m) {
+  return m >= 1000 ? (m / 1000).toFixed(2) + ' km' : Math.round(m) + ' m';
+}
+
+/* ═══════════════════════════════════════════════════════
+   Audio — Web Audio API oscillator alarm
+══════════════════════════════════════════════════════ */
+function getAudio() {
+  if (!S.audioCtx) S.audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return S.audioCtx;
+}
+
+function beep(freq, dur, vol = 0.85) {
+  const ctx = getAudio();
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.type = 'square';
+  osc.frequency.value = freq;
+  gain.gain.setValueAtTime(vol, ctx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur);
+  osc.start(ctx.currentTime);
+  osc.stop(ctx.currentTime + dur + 0.02);
+}
+
+const ALARM_PATTERN = [880, 1108, 880, 1318, 880, 1318, 1108];
+let _alarmStep = 0;
+
+function startAlarm() {
+  if (S.alarmLoop) return;
+  _alarmStep = 0;
+  const tick = () => {
+    if (!S.alarmFiring) return;
+    beep(ALARM_PATTERN[_alarmStep % ALARM_PATTERN.length], 0.14);
+    _alarmStep++;
+  };
+  tick();
+  S.alarmLoop = setInterval(tick, 180);
+}
+
+function stopAlarm() {
+  clearInterval(S.alarmLoop);
+  S.alarmLoop = null;
+}
+
+/* ═══════════════════════════════════════════════════════
+   Nominatim geocoding search
+══════════════════════════════════════════════════════ */
+let debounceTimer;
+
+searchInput.addEventListener('input', () => {
+  clearTimeout(debounceTimer);
+  const q = searchInput.value.trim();
+  if (q.length < 3) { closeResults(); return; }
+  debounceTimer = setTimeout(() => doSearch(q), 420);
+});
+
+searchBtn.addEventListener('click', () => {
+  const q = searchInput.value.trim();
+  if (q) doSearch(q);
+});
+
+searchInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); doSearch(searchInput.value.trim()); }
+});
+
+async function doSearch(query) {
+  if (!query) return;
+  searchBtn.classList.add('loading');
+  resultsList.innerHTML = `<div class="result-item" style="color:var(--muted)">Searching…</div>`;
+  resultsList.classList.add('open');
+
+  try {
+    const r = await fetch(
+      `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&limit=6`,
+      { headers: { 'Accept-Language': 'en' } }
+    );
+    const data = await r.json();
+    renderResults(data);
+  } catch {
+    resultsList.innerHTML = `<div class="result-item" style="color:var(--danger)">Search failed — check connection</div>`;
+  } finally {
+    searchBtn.classList.remove('loading');
+  }
+}
+
+function renderResults(places) {
+  if (!places.length) {
+    resultsList.innerHTML = `<div class="result-item" style="color:var(--muted)">No results found</div>`;
+    return;
+  }
+  resultsList.innerHTML = '';
+  places.forEach(p => {
+    const name = p.name || p.display_name.split(',')[0].trim();
+    const addr = p.display_name;
+    const div = document.createElement('div');
+    div.className = 'result-item';
+    div.innerHTML = `<div class="ri-name">${name}</div><div class="ri-addr">${addr}</div>`;
+    div.addEventListener('click', () => {
+      applyTarget(parseFloat(p.lat), parseFloat(p.lon), name);
+      searchInput.value = name;
+      closeResults();
+    });
+    resultsList.appendChild(div);
+  });
+}
+
+function closeResults() {
+  resultsList.classList.remove('open');
+}
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('.search-wrap') && !e.target.closest('#resultsList')) closeResults();
+});
+
+/* ═══════════════════════════════════════════════════════
+   Manual coordinates
+══════════════════════════════════════════════════════ */
+coordsToggle.addEventListener('click', () => {
+  const open = coordsRow.classList.toggle('open');
+  coordsArrow.classList.toggle('open', open);
+});
+
+coordsSetBtn.addEventListener('click', () => {
+  const lat = parseFloat(latIn.value);
+  const lon = parseFloat(lonIn.value);
+  if (isNaN(lat) || isNaN(lon) || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+    alert('Invalid coordinates.\nLatitude: −90 to 90\nLongitude: −180 to 180');
+    return;
+  }
+  applyTarget(lat, lon, `${lat.toFixed(5)}, ${lon.toFixed(5)}`);
+});
+
+/* ═══════════════════════════════════════════════════════
+   Target
+══════════════════════════════════════════════════════ */
+function applyTarget(lat, lon, name) {
+  S.target = { lat, lon, name };
+  S.alarmArmed = true;
+
+  chipName.textContent = name;
+  targetChip.classList.add('visible');
+
+  if (S.targetMarker) S.map.removeLayer(S.targetMarker);
+  if (S.radiusCircle) S.map.removeLayer(S.radiusCircle);
+
+  S.targetMarker = L.marker([lat, lon], { icon: targetIconEl }).addTo(S.map);
+  S.radiusCircle = L.circle([lat, lon], {
+    radius: S.radius, color: '#3b82f6',
+    fillColor: '#3b82f6', fillOpacity: 0.1, weight: 2
+  }).addTo(S.map);
+
+  fitMap();
+  if (S.pos) updateDistance();
+}
+
+clearBtn.addEventListener('click', clearTarget);
+
+function clearTarget() {
+  S.target = null;
+  targetChip.classList.remove('visible');
+  searchInput.value = '';
+  if (S.targetMarker) { S.map.removeLayer(S.targetMarker); S.targetMarker = null; }
+  if (S.radiusCircle) { S.map.removeLayer(S.radiusCircle); S.radiusCircle = null; }
+  distNum.textContent = '–';
+  distNum.className = 'dist-num';
+  statusMsg.textContent = 'Set a destination and tap Start';
+}
+
+/* ═══════════════════════════════════════════════════════
+   Radius slider
+══════════════════════════════════════════════════════ */
+radiusSlider.addEventListener('input', () => {
+  S.radius = +radiusSlider.value;
+  radiusBadge.textContent = S.radius >= 1000
+    ? (S.radius / 1000).toFixed(1) + ' km'
+    : S.radius + ' m';
+  if (S.radiusCircle) S.radiusCircle.setRadius(S.radius);
+});
+
+/* ═══════════════════════════════════════════════════════
+   Map helpers
+══════════════════════════════════════════════════════ */
+function fitMap() {
+  const pts = [];
+  if (S.target)           pts.push([S.target.lat,  S.target.lon]);
+  if (S.pos)              pts.push([S.pos.lat,      S.pos.lon]);
+  if (pts.length === 2)   S.map.fitBounds(pts, { padding: [40, 40], maxZoom: 15 });
+  else if (pts.length === 1) S.map.setView(pts[0], 14);
+}
+
+/* ═══════════════════════════════════════════════════════
+   GPS Tracking
+══════════════════════════════════════════════════════ */
+startBtn.addEventListener('click', startTracking);
+stopBtn.addEventListener('click', stopTracking);
+
+async function startTracking() {
+  if (!S.target) { alert('Please set a destination first.'); return; }
+  if (!navigator.geolocation) { alert('Geolocation not supported by this browser.'); return; }
+
+  /* Unblock AudioContext on user gesture */
+  getAudio().resume();
+
+  /* Screen wake lock (keeps display on) */
+  try {
+    if ('wakeLock' in navigator) S.wakeLock = await navigator.wakeLock.request('screen');
+  } catch { /* optional, ignore */ }
+
+  S.tracking = true;
+  startBtn.disabled = true;
+  stopBtn.disabled  = false;
+  hdrDot.className  = 'hdr-dot active';
+  statusMsg.textContent = 'Acquiring GPS signal…';
+
+  S.watchId = navigator.geolocation.watchPosition(onPosition, onGpsError, {
+    enableHighAccuracy: true,
+    timeout: 15000,
+    maximumAge: 2000,
+  });
+}
+
+function stopTracking() {
+  if (S.watchId !== null) { navigator.geolocation.clearWatch(S.watchId); S.watchId = null; }
+  if (S.wakeLock)         { S.wakeLock.release(); S.wakeLock = null; }
+
+  S.tracking    = false;
+  S.alarmFiring = false;
+  stopAlarm();
+  clearSnooze();
+  alarmOverlay.classList.remove('active');
+
+  startBtn.disabled = false;
+  stopBtn.disabled  = true;
+  hdrDot.className  = 'hdr-dot';
+  statusMsg.textContent = 'Tracking stopped.';
+  accMsg.textContent    = '';
+}
+
+function onPosition({ coords }) {
+  const { latitude: lat, longitude: lon, accuracy: acc } = coords;
+  S.pos = { lat, lon, acc };
+
+  accMsg.textContent = `GPS accuracy: ±${Math.round(acc)} m`;
+
+  if (!S.userMarker) {
+    S.userMarker = L.marker([lat, lon], { icon: userIcon }).addTo(S.map);
+  } else {
+    S.userMarker.setLatLng([lat, lon]);
+  }
+
+  if (S.target) updateDistance();
+  fitMap();
+}
+
+function onGpsError(err) {
+  const msgs = { 1: 'Location access denied.', 2: 'Position unavailable.', 3: 'GPS timed out.' };
+  statusMsg.textContent = msgs[err.code] || 'GPS error.';
+  accMsg.textContent = '';
+}
+
+/* ═══════════════════════════════════════════════════════
+   Distance + alarm logic
+══════════════════════════════════════════════════════ */
+function updateDistance() {
+  const dist = haversine(S.pos.lat, S.pos.lon, S.target.lat, S.target.lon);
+  const ratio = dist / S.radius;
+
+  /* Display */
+  distNum.textContent = fmtDist(dist);
+  distNum.className   = 'dist-num' + (ratio <= 1 ? ' inside' : ratio <= 2.5 ? ' near' : '');
+
+  if (!S.tracking) return;
+
+  if (ratio <= 1) {
+    statusMsg.textContent = `Inside radius! (${Math.round(dist)} m from target)`;
+
+    if (S.alarmArmed && !S.alarmFiring && !S.snoozed) {
+      fireAlarm(dist);
+    }
+  } else {
+    statusMsg.textContent = ratio <= 2.5
+      ? `Approaching — ${fmtDist(dist)} away`
+      : `Tracking → ${S.target.name}`;
+
+    /* Re-arm once user leaves the radius (with 20% buffer) */
+    if (!S.alarmArmed && ratio > 1.2) S.alarmArmed = true;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════
+   Alarm
+══════════════════════════════════════════════════════ */
+function fireAlarm(dist) {
+  S.alarmFiring = true;
+  S.alarmArmed  = false;
+
+  hdrDot.className  = 'hdr-dot alarming';
+  alarmSub.textContent = `You are ${Math.round(dist)} m from your destination.`;
+  alarmOverlay.classList.add('active');
+
+  startAlarm();
+
+  if (navigator.vibrate) navigator.vibrate([600, 150, 600, 150, 600, 150, 1000]);
+}
+
+dismissBtn.addEventListener('click', () => {
+  S.alarmFiring = false;
+  S.alarmArmed  = false;  /* won't re-arm until user leaves radius */
+  stopAlarm();
+  alarmOverlay.classList.remove('active');
+  hdrDot.className  = 'hdr-dot active';
+  statusMsg.textContent = 'Alarm dismissed. Still tracking.';
+});
+
+snoozeBtn.addEventListener('click', () => {
+  S.alarmFiring = false;
+  S.snoozed     = true;
+  stopAlarm();
+  alarmOverlay.classList.remove('active');
+  hdrDot.className  = 'hdr-dot active';
+
+  const SNOOZE_MS = 5 * 60 * 1000;
+  S.snoozeEnd = Date.now() + SNOOZE_MS;
+  snoozeBanner.classList.add('visible');
+  renderSnoozeTime();
+
+  S.snoozeCountdownInterval = setInterval(() => {
+    if (Date.now() >= S.snoozeEnd) {
+      clearSnooze();
+      S.alarmArmed = true;
+      statusMsg.textContent = 'Snooze ended. Monitoring resumed.';
+    } else {
+      renderSnoozeTime();
+    }
+  }, 1000);
+});
+
+snoozeCancelBtn.addEventListener('click', () => {
+  clearSnooze();
+  S.alarmArmed = true;
+});
+
+function renderSnoozeTime() {
+  const rem = Math.max(0, S.snoozeEnd - Date.now());
+  const m = Math.floor(rem / 60000);
+  const s = Math.floor((rem % 60000) / 1000);
+  snoozeTime.textContent = `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+function clearSnooze() {
+  S.snoozed = false;
+  clearInterval(S.snoozeCountdownInterval);
+  S.snoozeCountdownInterval = null;
+  S.snoozeEnd = 0;
+  snoozeBanner.classList.remove('visible');
+}
+
+/* Re-acquire wake lock if page becomes visible again (e.g. tab switch back) */
+document.addEventListener('visibilitychange', async () => {
+  if (document.visibilityState === 'visible' && S.tracking && !S.wakeLock) {
+    try { S.wakeLock = await navigator.wakeLock.request('screen'); } catch { /* ok */ }
+  }
+});
+</script>
+
+<!-- ── Service Worker registration ──────────────────────────────────── -->
+<script>
+  /* PWA install prompt — captured and shown as in-UI button */
+  let _installPrompt = null;
+  const installBtn   = document.getElementById('installBtn');
+
+  window.addEventListener('beforeinstallprompt', e => {
+    e.preventDefault();
+    _installPrompt = e;
+    installBtn.classList.add('visible');
+  });
+
+  installBtn.addEventListener('click', async () => {
+    if (!_installPrompt) return;
+    _installPrompt.prompt();
+    const { outcome } = await _installPrompt.userChoice;
+    if (outcome === 'accepted') installBtn.classList.remove('visible');
+    _installPrompt = null;
+  });
+
+  window.addEventListener('appinstalled', () => {
+    installBtn.classList.remove('visible');
+    _installPrompt = null;
+  });
+
+  /* Register service worker */
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('./service-worker.js')
+        .catch(err => console.warn('SW registration failed:', err));
+    });
+  }
+</script>
+</body>
+</html>
